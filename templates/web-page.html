@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spolyfy</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+
+        textarea {
+            resize: both; /* 手動リサイズを許可 */
+            min-height: 200px; /* 高さの最小値を指定（任意） */
+            width: 100%;
+        }
+
+        .header {
+            background-color: #eee; /* ヘッダーの背景色（任意） */
+            width: 100%; /* 幅いっぱいに設定 */
+            display: flex;
+            justify-content: center; /* タイトルを中央寄せ */
+            align-items: center; /* 垂直方向中央揃え */
+            padding: 15px 0; /* 上下のpadding */
+            margin-bottom: 10px; /* ボタンとの間隔を調整 */
+            box-sizing: border-box; /* paddingを含めてwidthを計算 */
+        }
+
+        .title-box {
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .button-container {
+            width: 100%;
+            display: flex;
+            justify-content: center; /* 中央寄せ */
+            margin-bottom: 20px; /* コンテンツとの間隔を調整 */
+        }
+
+        button {
+            border: 1px solid black;
+            padding: 10px 20px;
+            cursor: pointer; /* マウスオーバーでカーソルを変更 */
+            font-size: 1em;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .song-name-box {
+            grid-column: 1 / -1; /* 幅いっぱいに表示 */
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .artist-name-box {
+            grid-column: 1 / -1; /* 幅いっぱいに表示 */
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .original-text-box, .translation-box {
+            border: 1px solid black;
+            padding: 15px;
+            min-height: 200px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2em;
+        }
+
+        /* レスポンシブ対応 */
+        @media (max-width: 1200px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                flex-direction: column; /* 縦並び */
+                padding: 10px 0;
+            }
+
+            .title-box {
+                margin-bottom: 10px; /* ボタンとの間隔を調整 */
+                width: 80%;
+                justify-self: stretch;
+            }
+
+            .button-container {
+                justify-content: stretch; /* 幅いっぱいに */
+                margin-bottom: 15px;
+            }
+
+            button {
+                width: 100%; /* 幅いっぱいに表示 */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title-box">Spolyfy</div>
+    </div>
+    <div class="container">
+        <div class="Spotify-username-box">Spotifyユーザー名</div>
+        <input class="Spotify-username-textarea" rows="1" cols="20" placeholder="Spotifyユーザー名を入力" value="{{ spotify_username.display_name }}"></input>
+    </div>
+
+    <div class="button-container">
+        <button id="getSongInfo">Get Song's Info</button>
+        <button id="getLyrics">Get Lyrics</button>
+    </div>
+
+    <div class="container">
+        <div id="songInfo">曲名</div>
+        <div id="artist-name-box">アーティスト名</div>
+        <div class="original-text-box" id="originalLyrics">
+            <p></p>
+        </div>
+        <div class="translation-box" id="translatedLyrics">
+            <p></p>
+        </div>
+    </div>
+
+    <script>
+        function autoResize(textarea) {
+            textarea.style.height = 'auto'; // 一旦リセット
+            textarea.style.height = (textarea.scrollHeight) + 'px'; // 内容に合わせて高さを設定
+        }
+
+        function getLyrics() {
+            fetch('/lyrics')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("songInfo").innerText = data.track;
+                    document.getElementById("artist-name-box").innerText = data.artist;
+                    document.getElementById("originalLyrics").getElementsByTagName('p')[0].innerText = data.original_lyrics;
+                    document.getElementById("translatedLyrics").innerText = data.translated_lyrics;
+                });
+        }
+
+        document.getElementById("getLyrics").addEventListener("click", getLyrics);
+
+        function getSongInfo() {            
+            fetch('/currently_playing')
+                .then(response => response.json())
+                .then(data => {
+                    if (data) {
+                        document.getElementById("songInfo").innerText = data.track_name;
+                        document.getElementById("artist-name-box").innerText = data.artist_name;
+                    }
+                })
+                .catch(error => {
+                    console.error("Error:", error);
+                });
+        }
+        document.getElementById("getSongInfo").addEventListener("click", getSongInfo);
+
+
+        window.addEventListener("DOMContentLoaded", () => {
+            // textareaタグを全て取得
+            const textareaEls = document.querySelectorAll("textarea");
+
+            textareaEls.forEach((textareaEl) => {
+                // デフォルト値としてスタイル属性を付与
+                textareaEl.setAttribute("style", `height: ${textareaEl.scrollHeight}px;`);
+                // inputイベントが発生するたびに関数呼び出し
+                textareaEl.addEventListener("input", setTextareaHeight);
+            });
+
+            // textareaの高さを計算して指定する関数
+            function setTextareaHeight() {
+                this.style.height = "auto";
+                this.style.height = `${this.scrollHeight}px`;
+            }
+        });
+
+
+</script>
+
+</body>
+</html>
