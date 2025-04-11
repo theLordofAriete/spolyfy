@@ -26,8 +26,8 @@
             display: flex;
             justify-content: center; /* タイトルを中央寄せ */
             align-items: center; /* 垂直方向中央揃え */
-            padding: 15px 0; /* 上下のpadding */
-            margin-bottom: 10px; /* ボタンとの間隔を調整 */
+            padding: 5px 0; /* 上下のpadding */
+            margin-bottom: 5px; /* ボタンとの間隔を調整 */
             box-sizing: border-box; /* paddingを含めてwidthを計算 */
         }
 
@@ -75,10 +75,10 @@
             /* grid-column: 1 / -1; 幅いっぱいに表示 */
             border: 1px solid black;
             width: 100%;
-            gap: 20px;
+            gap: 10px;
             padding: 10px;
-            margin-top: 10px; /* 上のコンテンツとの間隔を調整 */
-            margin-bottom: 10px;
+            margin-top: 3px; /* 上のコンテンツとの間隔を調整 */
+            margin-bottom: 3px;
             text-align: center;
             box-sizing: border-box;
             /* display: flex; */
@@ -86,7 +86,6 @@
             /* align-items: center; */
             /* font-size: 1.2em; */
         }
-
         /* レスポンシブ対応 */
         @media (max-width: 1200px) {
             .container {
@@ -99,14 +98,14 @@
             }
 
             .title-box {
-                margin-bottom: 10px; /* ボタンとの間隔を調整 */
+                margin-bottom: 5px; /* ボタンとの間隔を調整 */
                 width: 80%;
                 justify-self: stretch;
             }
 
             .button-container {
                 justify-content: stretch; /* 幅いっぱいに */
-                margin-bottom: 15px;
+                margin-bottom: 5px;
             }
 
             button {
@@ -120,23 +119,23 @@
         <div class="title-box">Spolyfy</div>
     </div>
     <div class="container">
-        <div class="Spotify-username-box">Spotifyユーザー名: {{ spotify_username.display_name }}</div>
+        <div class="Spotify-username-box">Spotify username: {{ spotify_username.display_name }}</div>
     </div>
 
     <div class="button-container">
         <button id="getSongInfo">Get Song's Info</button>
         <button id="getLyrics">Get Lyrics</button>
+        <button id="forceGetLyrics">Force re-getting Lyrics</button>
     </div>
+
+    <div class="container">
+        <div id="get_lyrics_time">time:</div>
+    </div>
+
 
     <div class="container">
         <div class="song-name-box" id="songInfo">曲名</div>
         <div class="artist-name-box" id="artist-name-box">アーティスト名</div>
-        <!-- <div class="original-text-box" id="originalLyrics">
-            <p></p>
-        </div> -->
-        <!-- <div class="translation-box" id="translatedLyrics">
-            <p></p>
-        </div> -->
     </div>
 
     <div class="translation-box" id="translatedLyrics">
@@ -156,12 +155,25 @@
                 .then(data => {
                     document.getElementById("songInfo").innerText = data.track;
                     document.getElementById("artist-name-box").innerText = data.artist;
-                    // document.getElementById("originalLyrics").getElementsByTagName('p')[0].innerText = data.original_lyrics;
+                    document.getElementById("get_lyrics_time").innerText = "time: " + data.get_lyrics_time;
                     document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = data.translated_lyrics;
                 });
         }
 
         document.getElementById("getLyrics").addEventListener("click", getLyrics);
+
+        function forceGetLyrics() {
+            fetch('/force_lyrics')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("songInfo").innerText = data.track;
+                    document.getElementById("artist-name-box").innerText = data.artist;
+                    document.getElementById("get_lyrics_time").innerText = "time: " + data.get_lyrics_time;
+                    document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = data.translated_lyrics;
+                });
+        }
+
+        document.getElementById("forceGetLyrics").addEventListener("click", forceGetLyrics);
 
         function getSongInfo() {            
             fetch('/currently_playing')

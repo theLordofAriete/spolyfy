@@ -11,6 +11,8 @@ import time
 import socket
 import csv
 from datetime import datetime
+import sqlite3
+import hashlib
 
 load_dotenv()
 
@@ -43,6 +45,9 @@ genius = lyricsgenius.Genius(GENIUS_API_TOKEN)
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-2.0-flash')
 
+# SQLite database setup
+DB_PATH = 'translations.db'
+
 # Configure logging
 log_file = './spolyfy.log'
 log_level = logging.DEBUG
@@ -61,10 +66,19 @@ class CSVHandler(logging.Handler):
         self.stream = None
         self.writer = None
         self.open_file()
+        # Write headers if file is empty
+        self.write_headers_if_needed()
 
     def open_file(self):
         self.stream = open(self.filename, self.mode, encoding=self.encoding, newline='')
         self.writer = csv.writer(self.stream)
+
+    def write_headers_if_needed(self):
+        # Check if file is empty
+        if os.path.getsize(self.filename) == 0:
+            headers = ['Timestamp', 'Level', 'Track', 'Artist', 'Translated Lyrics', 'Remote Address', 'Translation Time (s)', 'Cache Used']
+            self.writer.writerow(headers)
+            self.stream.flush()
 
     def emit(self, record):
         try:
@@ -84,15 +98,6 @@ class CSVHandler(logging.Handler):
     def formatTime(self, record):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# Configure logging
-log_file = './spolyfy.log'
-log_level = logging.DEBUG
-log_max_bytes = 30 * 1024 * 1024  # 30MB
-log_backup_count = 5  # Rotate through 5 files
-
-logger = logging.getLogger('spolyfy_logger')
-logger.setLevel(log_level)
-
 # Create a rotating file handler
 csv_handler = CSVHandler(
     log_file,
@@ -103,6 +108,57 @@ csv_handler = CSVHandler(
 # Add the handler to the logger
 logger.addHandler(csv_handler)
 
+def init_db():
+    """Initialize the SQLite database for storing translations."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS translations (
+        id TEXT PRIMARY KEY,
+        artist TEXT NOT NULL,
+        track TEXT NOT NULL,
+        translated_lyrics TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_translation_from_db(artist_name, track_name):
+    """Check if a translation exists in the database and return it if found."""
+    # Create a unique key for the song
+    song_key = f"{artist_name}|{track_name}"
+    song_id = hashlib.md5(song_key.encode()).hexdigest()
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT translated_lyrics FROM translations WHERE id = ?', (song_id,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        print(f"Translation found in cache for {track_name} by {artist_name}")
+        return result[0]
+    return None
+
+def save_translation_to_db(artist_name, track_name, translated_lyrics):
+    """Save a translation to the database."""
+    # Create a unique key for the song
+    song_key = f"{artist_name}|{track_name}"
+    song_id = hashlib.md5(song_key.encode()).hexdigest()
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT OR REPLACE INTO translations (id, artist, track, translated_lyrics)
+    VALUES (?, ?, ?, ?)
+    ''', (song_id, artist_name, track_name, translated_lyrics))
+    conn.commit()
+    conn.close()
+    print(f"Translation saved to cache for {track_name} by {artist_name}")
+
+# Initialize the database
+init_db()
 
 @app.route('/')
 def index():
@@ -174,7 +230,6 @@ def translate_to_japanese(text):
         print(f"Translation error: {e}")
         return "Translation failed"
 
-
 @app.route('/lyrics')
 def get_lyrics():
     cache_handler = spotipy.cache_handler.FlaskSessionCacheHandler(session)
@@ -199,34 +254,50 @@ def get_lyrics():
             return jsonify({
                 'artist': 'No song playing',
                 'track': 'No song playing',
-                'original_lyrics': 'No song playing',
                 'translated_lyrics': 'No song playing'
             })
 
         track_name = current_track['item']['name']
-
         artist_name = current_track['item']['album']['artists'][0]['name']
         # just for debugging
         print(f"Track: {track_name}, Artist: {artist_name}")
 
-        # Get lyrics from Genius
-        print(f"Searching for lyrics for {track_name} by {artist_name}")
-        song = genius.search_song(track_name, artist=artist_name)
-        if song is None:
-            return jsonify({
-                'artist': artist_name,
-                'track': track_name,
-                'original_lyrics': 'Lyrics not found',
-                'translated_lyrics': 'Lyrics not found'
-            })
+        # ここでDBに既に翻訳された歌詞があるかどうかを既にあるかどうかを確認する。
+        # もし、ある場合は、その歌詞を返す。
+        # もし、ない場合は、Geniusから歌詞を取得する。
+        # そして、その歌詞をDBに保存する。
+        # Check if translation exists in database
+        # Start timing the translation process
+        get_lyrics_start_time = time.time()
 
-        lyrics = song.lyrics
-        # print(f"Lyrics found: {lyrics}")
+        translated_lyrics = get_translation_from_db(artist_name, track_name)
+        cache_used = translated_lyrics is not None
 
-        # Translate to Japanese if lyrics are in English
-        print(f"Now translating lyrics to Japanese")
-        translated_lyrics = translate_to_japanese(lyrics)
-        # print(f"Translated lyrics: {translated_lyrics}")
+        # If not in database, Get lyrics from Genius then translate and save
+        if translated_lyrics is None:
+            # Get lyrics from Genius
+            print(f"Searching for lyrics for {track_name} by {artist_name}")
+            song = genius.search_song(track_name, artist=artist_name)
+            if song is None:
+                return jsonify({
+                    'artist': artist_name,
+                    'track': track_name,
+                    'translated_lyrics': 'Lyrics not found'
+                })
+
+            lyrics = song.lyrics
+            # print(f"Lyrics found: {lyrics}")
+
+            # Translate lyrics to Japanese
+            print(f"Now translating lyrics to Japanese")
+            translated_lyrics = translate_to_japanese(lyrics)
+            # Save translation to database
+            save_translation_to_db(artist_name, track_name, translated_lyrics)
+
+        
+        # Calculate translation time
+        get_lyrics_time = time.time() - get_lyrics_start_time
+        print(f"get_lyrics time: {get_lyrics_time:.2f} seconds, Cache used: {'Yes' if cache_used else 'No'}")
 
         # Log the access
         # Get the remote address, which may be behind a proxy or load balancer
@@ -246,7 +317,8 @@ def get_lyrics():
         translated_lyrics = translated_lyrics if translated_lyrics else "No Lyrics"
 
         try:
-            log_data = [track_name, artist_name, translated_lyrics, remote_addr]
+            # Include translation time and cache usage in the log
+            log_data = [track_name, artist_name, remote_addr, f"{get_lyrics_time:.2f}", "Yes" if cache_used else "No"]
             logger.log(logging.INFO, log_data)
         except Exception as e:
             print(f"Logging error: {e}")
@@ -254,8 +326,9 @@ def get_lyrics():
         return jsonify({
             'artist': artist_name,
             'track': track_name,
-            'original_lyrics': lyrics,
-            'translated_lyrics': translated_lyrics
+            'translated_lyrics': translated_lyrics,
+            'get_lyrics_time': f"{get_lyrics_time:.2f}",
+            'cache_used': "Yes" if cache_used else "No"
         })
 
     except Exception as e:
@@ -263,10 +336,110 @@ def get_lyrics():
         return jsonify({
             'artist': 'Error',
             'track': 'Error',
-            'original_lyrics': str(e),
             'translated_lyrics': str(e)
         })
 
+@app.route('/force_lyrics')
+def force_get_lyrics():
+    """
+    Retrieves the currently playing song information from Spotify,
+    fetches the lyrics from Genius, and translates them to Japanese.
+    This endpoint ignores the database cache and always performs a new translation.
+    """
+    cache_handler = spotipy.cache_handler.FlaskSessionCacheHandler(session)
+    auth_manager = spotipy.oauth2.SpotifyOAuth(client_id=SPOTIFY_CLIENT_ID,
+                                               client_secret=SPOTIFY_CLIENT_SECRET,
+                                               redirect_uri=REDIRECT_URI,
+                                               cache_handler=cache_handler)
+    if not auth_manager.validate_token(cache_handler.get_cached_token()):
+        return redirect('/')
+    spotify = spotipy.Spotify(auth_manager=auth_manager)
+
+    try:
+        # Get currently playing song
+        current_track = spotify.current_user_playing_track()
+
+        if current_track is None or current_track['item'] is None:
+            return jsonify({
+                'artist': 'No song playing',
+                'track': 'No song playing',
+                'translated_lyrics': 'No song playing'
+            })
+
+        track_name = current_track['item']['name']
+        artist_name = current_track['item']['album']['artists'][0]['name']
+        # just for debugging
+        print(f"Track: {track_name}, Artist: {artist_name}")
+
+        # Start timing the process
+        get_lyrics_start_time = time.time()
+        
+        # Force new translation by ignoring cache
+        print(f"Force re-getting lyrics for {track_name} by {artist_name}")
+        
+        # Get lyrics from Genius
+        print(f"Searching for lyrics for {track_name} by {artist_name}")
+        song = genius.search_song(track_name, artist=artist_name)
+        if song is None:
+            return jsonify({
+                'artist': artist_name,
+                'track': track_name,
+                'translated_lyrics': 'Lyrics not found'
+            })
+
+        lyrics = song.lyrics
+        # print(f"Lyrics found: {lyrics}")
+
+        # Translate lyrics to Japanese
+        print(f"Now translating lyrics to Japanese")
+        translated_lyrics = translate_to_japanese(lyrics)
+        
+        # Save translation to database (update cache)
+        save_translation_to_db(artist_name, track_name, translated_lyrics)
+        
+        # Calculate time
+        get_lyrics_time = time.time() - get_lyrics_start_time
+        print(f"Force re-get lyrics time: {get_lyrics_time:.2f} seconds")
+
+        # Log the access
+        # Get the remote address, which may be behind a proxy or load balancer
+        if request:
+            if request.headers.getlist("X-Forwarded-For"):
+                remote_addr = request.headers.getlist("X-Forwarded-For")[0]
+            elif hasattr(request, 'remote_addr'):
+                remote_addr = request.remote_addr
+            else:
+                remote_addr = "Unknown"
+        else:
+            remote_addr = "Unknown"
+
+        # Provide default values in case they are not available
+        track_name = track_name if track_name else "Unknown Track"
+        artist_name = artist_name if artist_name else "Unknown Artist"
+        translated_lyrics = translated_lyrics if translated_lyrics else "No Lyrics"
+
+        try:
+            # Include time and force flag in the log
+            log_data = [track_name, artist_name, remote_addr, f"{get_lyrics_time:.2f}", "Force"]
+            logger.log(logging.INFO, log_data)
+        except Exception as e:
+            print(f"Logging error: {e}")
+
+        return jsonify({
+            'artist': artist_name,
+            'track': track_name,
+            'translated_lyrics': translated_lyrics,
+            'get_lyrics_time': f"{get_lyrics_time:.2f}",
+            'cache_used': "Force"
+        })
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({
+            'artist': 'Error',
+            'track': 'Error',
+            'translated_lyrics': str(e)
+        })
 
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
