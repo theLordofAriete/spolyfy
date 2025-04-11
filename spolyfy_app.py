@@ -28,9 +28,9 @@ GENIUS_API_TOKEN = os.getenv('GENIUS_API_TOKEN')
 GOOGLE_API_KEY = os.getenv('GEMINI_API_KEY')
 
 # redirect_uri
-# REDIRECT_URI = os.getenv('REDIRECT_URI')
+REDIRECT_URI = os.getenv('REDIRECT_URI')
 # same as the one in Spotify app settings
-REDIRECT_URI = 'http://127.0.0.1:8080'
+# REDIRECT_URI = 'http://127.0.0.1:8080'
 
 # Spotipy setup
 client_credentials_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
@@ -270,3 +270,6 @@ def get_lyrics():
 
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
+    # Uncomment the following line to run with SSL
+    # app.run(debug=False, host="0.0.0.0", port=8080, ssl_context=('./cert/server.crt', './cert/server.key'))
+
