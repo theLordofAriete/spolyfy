@@ -43,7 +43,7 @@ genius = lyricsgenius.Genius(GENIUS_API_TOKEN)
 
 # Gemini setup
 genai.configure(api_key=GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # SQLite database setup
 DB_PATH = 'translations.db'
@@ -76,16 +76,22 @@ class CSVHandler(logging.Handler):
     def write_headers_if_needed(self):
         # Check if file is empty
         if os.path.getsize(self.filename) == 0:
-            headers = ['Timestamp', 'Level', 'Track', 'Artist', 'Translated Lyrics', 'Remote Address', 'Translation Time (s)', 'Cache Used']
+            headers = ['Timestamp', 'Level', 'Track', 'Artist', 'Remote Address', 'Translation Time (s)', 'Cache Used']
             self.writer.writerow(headers)
             self.stream.flush()
 
     def emit(self, record):
         try:
-            log_data = record.msg
             timestamp = self.formatTime(record)
             level = record.levelname
-            row = [timestamp, level] + log_data # Modified line
+            # record.extra からデータを取得するように変更
+            track = getattr(record, 'track_name', 'N/A')
+            artist = getattr(record, 'artist_name', 'N/A')
+            remote_address = getattr(record, 'remote_address', 'N/A')
+            translation_time = getattr(record, 'translation_time', 'N/A')
+            cache_used = getattr(record, 'cache_used', 'N/A')
+            
+            row = [timestamp, level, track, artist, remote_address, translation_time, cache_used]
             self.writer.writerow(row)
             self.stream.flush()
         except Exception as e:
@@ -212,23 +218,52 @@ def currently_playing():
             })
     return "No track currently playing."
 
+@app.route('/get_now_playing_info')
+def get_now_playing_info():
+   cache_handler = spotipy.cache_handler.FlaskSessionCacheHandler(session)
+   auth_manager = spotipy.oauth2.SpotifyOAuth(client_id=SPOTIFY_CLIENT_ID,
+                                              client_secret=SPOTIFY_CLIENT_SECRET,
+                                              redirect_uri=REDIRECT_URI,
+                                              cache_handler=cache_handler)
+   if not auth_manager.validate_token(cache_handler.get_cached_token()):
+       return jsonify({'track_name': '認証が必要です', 'artist_name': '認証が必要です'})
+   spotify = spotipy.Spotify(auth_manager=auth_manager)
+   current_track = spotify.current_user_playing_track()
+   if current_track and current_track['item']:
+       track_name = current_track['item']['name']
+       artist_name = current_track['item']['album']['artists'][0]['name']
+       return jsonify({'track_name': track_name, 'artist_name': artist_name})
+   return jsonify({'track_name': '再生中の曲はありません', 'artist_name': '再生中の曲はありません'})
+
 def translate_to_japanese(text):
     """Translates the given text to Japanese using the Gemini API."""
     try:
         prompt = f"Your professional of translater who translate to japanese."\
                 f"Translate the song lyrics to Japanese. "\
-                f"If it's already in Japanese, return the original text. " \
+                f"The original text might not be in English. whether it is in English or not,Translate it to Japanese."\
+                f"However there is one exception. If it's already in Japanese, just return the original text. " \
                 f"Make sure to keep the original meaning and context. "\
                 f"In the output, please display the translation below the original text, and repeat this for each paragraph."\
-                f"The beginning of the [[text]] may contain summary or background information about the song. Please ignore this."\
-                f"Do not add any extra information. such as the explanation of meanings. please just answer the Transrated lyrics."\
-                f"Here are the lyrics: {text}"
+                f"The beginning of the [[text]] may contain summary or background information about the song. Please ignore these."\
+                f"Do not add any extra information. such as the explanation of meanings. please just answer the transrated lyrics."\
+                f"Here are the original lyrics: {text}"
 
         response = model.generate_content(prompt)
         return response.text
+    except genai.types.BlockedPromptException as e:
+        error_message = f"Translation error: Prompt was blocked - {e}"
+        logger.error(error_message, exc_info=True)
+        print(error_message)
+        return error_message
     except Exception as e:
-        print(f"Translation error: {e}")
-        return "Translation failed"
+        # Check for quota exceeded error specifically
+        if "quota exceeded" in str(e).lower() or "429" in str(e):
+            error_message = f"Translation error: Quota exceeded. Please check your Gemini API plan and billing details. もしくは、選択しているAPIが非推奨になっている可能性があります。最新のモデルを使うようAPI設定を変更してください。"
+        else:
+            error_message = f"Translation error: An unexpected error occurred - {e}"
+        logger.error(error_message, exc_info=True)
+        print(error_message)
+        return error_message
 
 @app.route('/lyrics')
 def get_lyrics():
@@ -247,20 +282,24 @@ def get_lyrics():
     Returns the song information, original lyrics, and translated lyrics as a JSON response.
     """
     try:
-        # Get currently playing song
-        current_track = spotify.current_user_playing_track()
+        # Get track and artist from request parameters
+        track_name = request.args.get('track')
+        artist_name = request.args.get('artist')
 
-        if current_track is None or current_track['item'] is None:
-            return jsonify({
-                'artist': 'No song playing',
-                'track': 'No song playing',
-                'translated_lyrics': 'No song playing'
-            })
+        if not track_name or not artist_name:
+            # Fallback to currently playing if parameters are missing (for backward compatibility if needed)
+            current_track = spotify.current_user_playing_track()
+            if current_track is None or current_track['item'] is None:
+                return jsonify({
+                    'artist': 'No song playing',
+                    'track': 'No song playing',
+                    'translated_lyrics': 'No song playing'
+                })
+            track_name = current_track['item']['name']
+            artist_name = current_track['item']['album']['artists'][0]['name']
 
-        track_name = current_track['item']['name']
-        artist_name = current_track['item']['album']['artists'][0]['name']
         # just for debugging
-        print(f"Track: {track_name}, Artist: {artist_name}")
+        print(f"Fetching lyrics for: {track_name}, Artist: {artist_name}")
 
         # ここでDBに既に翻訳された歌詞があるかどうかを既にあるかどうかを確認する。
         # もし、ある場合は、その歌詞を返す。
@@ -318,8 +357,17 @@ def get_lyrics():
 
         try:
             # Include translation time and cache usage in the log
-            log_data = [track_name, artist_name, remote_addr, f"{get_lyrics_time:.2f}", "Yes" if cache_used else "No"]
-            logger.log(logging.INFO, log_data)
+            logger.info(
+                "Lyrics translation request",
+                extra={
+                    'track_name': track_name,
+                    'artist_name': artist_name,
+                    'translated_lyrics': translated_lyrics,
+                    'remote_address': remote_addr,
+                    'translation_time': f"{get_lyrics_time:.2f}",
+                    'cache_used': "Yes" if cache_used else "No"
+                }
+            )
         except Exception as e:
             print(f"Logging error: {e}")
 
@@ -332,11 +380,13 @@ def get_lyrics():
         })
 
     except Exception as e:
-        print(f"Error: {e}")
+        error_message = str(e)
+        print(f"Error: {error_message}")
         return jsonify({
             'artist': 'Error',
             'track': 'Error',
-            'translated_lyrics': str(e)
+            'translated_lyrics': "", # エラー時は空にするか、より適切なメッセージを設定
+            'error_message': error_message # エラーメッセージをウェブページに渡す
         })
 
 @app.route('/force_lyrics')
@@ -356,20 +406,24 @@ def force_get_lyrics():
     spotify = spotipy.Spotify(auth_manager=auth_manager)
 
     try:
-        # Get currently playing song
-        current_track = spotify.current_user_playing_track()
+        # Get track and artist from request parameters
+        track_name = request.args.get('track')
+        artist_name = request.args.get('artist')
 
-        if current_track is None or current_track['item'] is None:
-            return jsonify({
-                'artist': 'No song playing',
-                'track': 'No song playing',
-                'translated_lyrics': 'No song playing'
-            })
+        if not track_name or not artist_name:
+            # Fallback to currently playing
+            current_track = spotify.current_user_playing_track()
+            if current_track is None or current_track['item'] is None:
+                return jsonify({
+                    'artist': 'No song playing',
+                    'track': 'No song playing',
+                    'translated_lyrics': 'No song playing'
+                })
+            track_name = current_track['item']['name']
+            artist_name = current_track['item']['album']['artists'][0]['name']
 
-        track_name = current_track['item']['name']
-        artist_name = current_track['item']['album']['artists'][0]['name']
         # just for debugging
-        print(f"Track: {track_name}, Artist: {artist_name}")
+        print(f"Force re-getting lyrics for: {track_name}, Artist: {artist_name}")
 
         # Start timing the process
         get_lyrics_start_time = time.time()
@@ -420,8 +474,17 @@ def force_get_lyrics():
 
         try:
             # Include time and force flag in the log
-            log_data = [track_name, artist_name, remote_addr, f"{get_lyrics_time:.2f}", "Force"]
-            logger.log(logging.INFO, log_data)
+            logger.info(
+                "Lyrics translation request (forced)",
+                extra={
+                    'track_name': track_name,
+                    'artist_name': artist_name,
+                    'translated_lyrics': translated_lyrics,
+                    'remote_address': remote_addr,
+                    'translation_time': f"{get_lyrics_time:.2f}",
+                    'cache_used': "Force"
+                }
+            )
         except Exception as e:
             print(f"Logging error: {e}")
 
@@ -434,15 +497,16 @@ def force_get_lyrics():
         })
 
     except Exception as e:
-        print(f"Error: {e}")
+        error_message = str(e)
+        print(f"Error: {error_message}")
         return jsonify({
             'artist': 'Error',
             'track': 'Error',
-            'translated_lyrics': str(e)
+            'translated_lyrics': "", # エラー時は空にするか、より適切なメッセージを設定
+            'error_message': error_message # エラーメッセージをウェブページに渡す
         })
 
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
     # Uncomment the following line to run with SSL
     # app.run(debug=False, host="0.0.0.0", port=8080, ssl_context=('./cert/server.crt', './cert/server.key'))
-

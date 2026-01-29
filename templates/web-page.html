@@ -26,22 +26,25 @@
             display: flex;
             justify-content: center; /* タイトルを中央寄せ */
             align-items: center; /* 垂直方向中央揃え */
-            padding: 5px 0; /* 上下のpadding */
+            padding: 3px 0; /* 上下のpadding */
             margin-bottom: 5px; /* ボタンとの間隔を調整 */
             box-sizing: border-box; /* paddingを含めてwidthを計算 */
         }
 
         .title-box {
             border: 1px solid black;
-            padding: 10px;
+            padding: 3px;
             text-align: center;
+            transition: width 0.3s ease;
         }
 
         .button-container {
-            width: 100%;
             display: flex;
+            flex-direction: row; /* 横一列に並べる */
             justify-content: center; /* 中央寄せ */
             margin-bottom: 20px; /* コンテンツとの間隔を調整 */
+            transition: width 0.3s ease;
+            flex-wrap: nowrap; /* 折り返さない */
         }
 
         button {
@@ -49,30 +52,41 @@
             padding: 10px 20px;
             cursor: pointer; /* マウスオーバーでカーソルを変更 */
             font-size: 1em;
+            margin: 0 5px; /* ボタン間の間隔 */
+            white-space: nowrap; /* テキストを折り返さない */
         }
 
         .container {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
-            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             width: 100%;
+            max-width: 1200px;
         }
 
         .song-name-box {
             border: 1px solid black;
             padding: 10px;
             text-align: center;
+            margin-bottom: 10px;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            transition: width 0.3s ease;
         }
 
         .artist-name-box {
             border: 1px solid black;
             padding: 10px;
             text-align: center;
+            margin-bottom: 10px;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            transition: width 0.3s ease;
         }
 
         .translation-box {
-            /* grid-column: 1 / -1; 幅いっぱいに表示 */
             border: 1px solid black;
             width: 100%;
             gap: 10px;
@@ -81,17 +95,37 @@
             margin-bottom: 3px;
             text-align: center;
             box-sizing: border-box;
-            /* display: flex; */
-            /* justify-content: center; */
-            /* align-items: center; */
-            /* font-size: 1.2em; */
+            white-space: pre-wrap; /* 改行を保持 */
+            word-wrap: break-word; /* 長い単語を折り返す */
+            overflow-wrap: break-word; /* 長い単語を折り返す（新しいブラウザ用） */
+            max-width: 100%; /* 最大幅を設定 */
+            transition: width 0.3s ease; /* 幅の変更をスムーズに */
         }
+        
+        .info-box {
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+            margin-bottom: 10px;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            transition: width 0.3s ease;
+        }
+        
+        .time-box {
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+            margin-bottom: 10px;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            transition: width 0.3s ease;
+        }
+        
         /* レスポンシブ対応 */
         @media (max-width: 1200px) {
-            .container {
-                grid-template-columns: 1fr;
-            }
-
             .header {
                 flex-direction: column; /* 縦並び */
                 padding: 10px 0;
@@ -104,12 +138,15 @@
             }
 
             .button-container {
-                justify-content: stretch; /* 幅いっぱいに */
-                margin-bottom: 5px;
+                flex-direction: row; /* 横一列を維持 */
+                flex-wrap: wrap; /* 必要に応じて折り返す */
+                justify-content: center;
+                width: 100%;
             }
 
             button {
-                width: 100%; /* 幅いっぱいに表示 */
+                margin: 5px; /* 上下左右の間隔 */
+                flex: 0 1 auto; /* サイズを自動調整 */
             }
         }
     </style>
@@ -119,17 +156,21 @@
         <div class="title-box">Spolyfy</div>
     </div>
     <div class="container">
-        <div class="Spotify-username-box">Spotify username: {{ spotify_username.display_name }}</div>
-    </div>
-
-    <div class="button-container">
-        <button id="getSongInfo">Get Song's Info</button>
-        <button id="getLyrics">Get Lyrics</button>
-        <button id="forceGetLyrics">Force re-getting Lyrics</button>
+        <div class="info-box">Spotify username: {{ spotify_username.display_name }}</div>
     </div>
 
     <div class="container">
-        <div id="get_lyrics_time">time:</div>
+        <div class="error-message-box" id="errorMessage" style="color: red; display: none;"></div>
+    </div>
+
+    <div class="button-container">
+        <button id="getSongInfo">Song's Info</button>
+        <button id="getLyrics">Lyrics</button>
+        <button id="forceGetLyrics">Force re-getting</button>
+    </div>
+
+    <div class="container">
+        <div class="time-box" id="get_lyrics_time">time:</div>
     </div>
 
 
@@ -149,28 +190,139 @@
             textarea.style.height = (textarea.scrollHeight) + 'px'; // 内容に合わせて高さを設定
         }
 
-        function getLyrics() {
-            fetch('/lyrics')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById("songInfo").innerText = data.track;
-                    document.getElementById("artist-name-box").innerText = data.artist;
-                    document.getElementById("get_lyrics_time").innerText = "time: " + data.get_lyrics_time;
-                    document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = data.translated_lyrics;
-                });
+        // 歌詞の内容に基づいてtranslation-boxの幅を調整する関数
+        function adjustTranslationBoxWidth() {
+            const translationBox = document.getElementById("translatedLyrics");
+            const content = translationBox.getElementsByTagName('p')[0].innerText;
+            
+            // 測定用の一時要素を作成する関数
+            function measureWidth(text, font) {
+                const temp = document.createElement('div');
+                temp.style.position = 'absolute';
+                temp.style.visibility = 'hidden';
+                temp.style.whiteSpace = 'pre';
+                temp.style.width = 'auto';
+                temp.style.font = font;
+                temp.innerText = text;
+                document.body.appendChild(temp);
+                const width = temp.offsetWidth;
+                document.body.removeChild(temp);
+                return width;
+            }
+
+            // 各要素の取得
+            const songInfo = document.getElementById("songInfo");
+            const artistBox = document.getElementById("artist-name-box");
+            const infoBox = document.querySelector('.info-box');
+            const buttonContainer = document.querySelector('.button-container');
+
+            // フォント情報の取得
+            const pFont = window.getComputedStyle(translationBox.getElementsByTagName('p')[0]).font;
+            const songFont = window.getComputedStyle(songInfo).font;
+            const artistFont = window.getComputedStyle(artistBox).font;
+            const infoFont = window.getComputedStyle(infoBox).font;
+
+            // 各要素のテキスト幅を測定
+            const lyricsWidth = (!content || content.trim() === '' || content === '翻訳中...' || content === '再取得中...') ? 0 : measureWidth(content, pFont);
+            const songWidth = measureWidth(songInfo.innerText, songFont);
+            const artistWidth = measureWidth(artistBox.innerText, artistFont);
+            const infoWidth = measureWidth(infoBox.innerText, infoFont);
+            
+            // ボタンコンテナの幅（テキストではなく実際の要素の幅）
+            const buttonsWidth = buttonContainer.scrollWidth;
+
+            // 最大幅を決定（パディングを考慮して少し余裕を持たせる）
+            const maxWidthNeeded = Math.max(lyricsWidth, songWidth, artistWidth, infoWidth, buttonsWidth) + 40;
+            
+            // 画面幅を超えないように制限
+            const finalWidth = Math.min(maxWidthNeeded, window.innerWidth - 40);
+            
+            // 最小幅
+            const minWidth = 350;
+            const adjustedWidth = Math.max(finalWidth, minWidth);
+
+            // 各要素の幅を一括設定
+            const elementsToAdjust = [
+                translationBox,
+                songInfo,
+                artistBox,
+                infoBox,
+                document.querySelector('.time-box'),
+                document.querySelector('.title-box'),
+                buttonContainer
+            ];
+            
+            elementsToAdjust.forEach(element => {
+                if (element) {
+                    element.style.width = adjustedWidth + 'px';
+                }
+            });
+            return;
+        }
+
+
+        async function getLyrics() {
+            // まず曲情報を瞬時に取得して表示
+            try {
+                const infoResponse = await fetch('/get_now_playing_info');
+                const infoData = await infoResponse.json();
+                
+                document.getElementById("songInfo").innerText = infoData.track_name;
+                document.getElementById("artist-name-box").innerText = infoData.artist_name;
+                document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = "翻訳中...";
+                document.getElementById("get_lyrics_time").innerText = "time: fetching...";
+                
+                // 曲情報に基づいて幅を調整
+                setTimeout(adjustTranslationBoxWidth, 100);
+
+                // 次に歌詞と翻訳を取得（時間がかかる処理）
+                const lyricsResponse = await fetch(`/lyrics?track=${encodeURIComponent(infoData.track_name)}&artist=${encodeURIComponent(infoData.artist_name)}`);
+                const lyricsData = await lyricsResponse.json();
+
+                document.getElementById("get_lyrics_time").innerText = "time: " + lyricsData.get_lyrics_time;
+                document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = lyricsData.translated_lyrics;
+                
+                // 翻訳内容に基づいて幅を調整
+                setTimeout(adjustTranslationBoxWidth, 100);
+            } catch (error) {
+                console.error("Error:", error);
+                document.getElementById("errorMessage").innerText = "エラーが発生しました。";
+                document.getElementById("errorMessage").style.display = "block";
+            }
         }
 
         document.getElementById("getLyrics").addEventListener("click", getLyrics);
 
-        function forceGetLyrics() {
-            fetch('/force_lyrics')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById("songInfo").innerText = data.track;
-                    document.getElementById("artist-name-box").innerText = data.artist;
-                    document.getElementById("get_lyrics_time").innerText = "time: " + data.get_lyrics_time;
-                    document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = data.translated_lyrics;
-                });
+        async function forceGetLyrics() {
+            try {
+                // まず最新の曲情報を取得して表示
+                const infoResponse = await fetch('/get_now_playing_info');
+                const infoData = await infoResponse.json();
+                
+                document.getElementById("songInfo").innerText = infoData.track_name;
+                document.getElementById("artist-name-box").innerText = infoData.artist_name;
+                document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = "再取得中...";
+                document.getElementById("get_lyrics_time").innerText = "time: fetching...";
+                
+                // 曲情報に基づいて幅を調整
+                setTimeout(adjustTranslationBoxWidth, 100);
+
+                // 最新の曲情報に基づいて歌詞を強制再取得
+                const response = await fetch(`/force_lyrics?track=${encodeURIComponent(infoData.track_name)}&artist=${encodeURIComponent(infoData.artist_name)}`);
+                const data = await response.json();
+
+                document.getElementById("songInfo").innerText = data.track;
+                document.getElementById("artist-name-box").innerText = data.artist;
+                document.getElementById("get_lyrics_time").innerText = "time: " + data.get_lyrics_time;
+                document.getElementById("translatedLyrics").getElementsByTagName('p')[0].innerText = data.translated_lyrics;
+                
+                // 歌詞の内容に基づいて幅を調整
+                setTimeout(adjustTranslationBoxWidth, 100);
+            } catch (error) {
+                console.error("Error:", error);
+                document.getElementById("errorMessage").innerText = "エラーが発生しました。";
+                document.getElementById("errorMessage").style.display = "block";
+            }
         }
 
         document.getElementById("forceGetLyrics").addEventListener("click", forceGetLyrics);
@@ -182,6 +334,9 @@
                     if (data) {
                         document.getElementById("songInfo").innerText = data.track_name;
                         document.getElementById("artist-name-box").innerText = data.artist_name;
+                        
+                        // 曲情報取得後も幅を調整
+                        setTimeout(adjustTranslationBoxWidth, 100);
                     }
                 })
                 .catch(error => {
@@ -207,10 +362,16 @@
                 this.style.height = "auto";
                 this.style.height = `${this.scrollHeight}px`;
             }
+            
+            // ウィンドウのリサイズ時にtranslation-boxの幅を再調整
+            window.addEventListener('resize', adjustTranslationBoxWidth);
+            
+            // 初期表示時にも幅を調整
+            setTimeout(adjustTranslationBoxWidth, 100);
         });
 
 
-</script>
+    </script>
 
 </body>
 </html>
